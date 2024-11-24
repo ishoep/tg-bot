@@ -1,0 +1,334 @@
+from django.core.management.base import BaseCommand
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+import os
+from bot.models import UserRegistration
+import asyncio
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "7795385929:AAF98EsKowGgpg9wgEN91qpZZh5x5tLHTcM")
+
+LANGUAGE_SELECTION_IMAGE = "bot/management/commands/images/lang.jpg"
+MAIN_MENU_IMAGE = "bot/management/commands/images/menu.jpg"
+GAME_MENU_IMAGE = "bot/management/commands/images/games.jpg"
+
+async def delete_previous_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if isinstance(update.callback_query, CallbackQuery):
+        chat_id = update.callback_query.message.chat_id
+        
+    previous_message_id = context.user_data.get('previous_message_id')
+    if previous_message_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=previous_message_id)
+        except Exception as e:
+            print(f"Error deleting message: {e}")
+    
+    # Also try to delete the message that triggered the callback
+    if isinstance(update.callback_query, CallbackQuery):
+        try:
+            await update.callback_query.message.delete()
+        except Exception as e:
+            print(f"Error deleting callback message: {e}")
+
+def get_text(context, ru_text, en_text):
+    return ru_text if context.user_data.get('language') == 'ru' else en_text
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await delete_previous_message(update, context)
+    
+    language_keyboard = [
+        [InlineKeyboardButton("🇷🇺 Русский", callback_data='lang_ru')],
+        [InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')]
+    ]
+    reply_markup = InlineKeyboardMarkup(language_keyboard)
+
+    with open(LANGUAGE_SELECTION_IMAGE, 'rb') as photo:
+        message = await context.bot.send_photo(
+            chat_id=update.effective_chat.id,
+            photo=photo,
+            caption="Выберите язык / Choose your language:",
+            reply_markup=reply_markup
+        )
+        context.user_data['previous_message_id'] = message.message_id
+
+async def language_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    await delete_previous_message(update, context)
+
+    if query.data == 'lang_ru':
+        context.user_data['language'] = 'ru'
+    else:
+        context.user_data['language'] = 'en'
+
+    await show_main_menu(update, context)
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await delete_previous_message(update, context)
+    
+    menu_text = get_text(context, "Добро пожаловать в главное меню!", "Welcome to the main menu!")
+
+    main_menu_keyboard = [
+        [InlineKeyboardButton(get_text(context, "🎮 Играть", "🎮 Play"), callback_data='play')],
+        [InlineKeyboardButton(get_text(context, "👥 Канал", "👥 Channel"), url="https://t.me/txitNGBrugg5MTRi")],
+        [InlineKeyboardButton(get_text(context, "🌐 Сменить язык", "🌐 Change Language"), callback_data='start')]
+    ]
+    reply_markup = InlineKeyboardMarkup(main_menu_keyboard)
+
+    with open(MAIN_MENU_IMAGE, 'rb') as photo:
+        message = await context.bot.send_photo(
+            chat_id=update.effective_chat.id,
+            photo=photo,
+            caption=menu_text,
+            reply_markup=reply_markup
+        )
+        context.user_data['previous_message_id'] = message.message_id
+
+async def play(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    await delete_previous_message(update, context)
+
+    if context.user_data.get('done_subscribing', False):
+        await show_games_menu(query, context)
+    else:
+        message = await query.message.reply_text(
+            get_text(
+                context,
+                "Пожалуйста, отправьте запрос на вступление в наш канал и нажмите 'Готово', чтобы продолжить.",
+                "Please send a request to join our channel and click 'Done' to continue."
+            ),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(get_text(context, "Перейти в канал", "Go to Channel"), url="https://t.me/+txitNGBrugg5MTRi")],
+                [InlineKeyboardButton(get_text(context, "Готово", "Done"), callback_data='continue_after_subscribe')],
+                [InlineKeyboardButton(get_text(context, "Назад", "Back"), callback_data='show_main_menu')]
+            ])
+        )
+        context.user_data['previous_message_id'] = message.message_id
+
+async def continue_after_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    await delete_previous_message(update, context)
+
+    context.user_data['done_subscribing'] = True
+    message = await query.message.reply_text(
+        get_text(
+            context,
+            "Спасибо! Теперь вы можете продолжить.",
+            "Thank you! You can now continue."
+        )
+    )
+    context.user_data['previous_message_id'] = message.message_id
+    
+    await asyncio.sleep(2)
+    await show_games_menu(query, context)
+
+async def show_games_menu(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = query.message.chat.id
+    previous_message_id = context.user_data.get('previous_message_id')
+    if previous_message_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=previous_message_id)
+        except Exception as e:
+            print(f"Error deleting message: {e}")
+
+    games_keyboard = [
+        [
+            InlineKeyboardButton("✈️ Aviator", callback_data='game_1'),
+            InlineKeyboardButton("🚀 LuckyJet", callback_data='game_2'),
+            InlineKeyboardButton("🚗 Speed&Cash", callback_data='game_3')
+        ],
+        [
+            InlineKeyboardButton("💣 Mines", callback_data='game_4'),
+            InlineKeyboardButton("👑 Royal", callback_data='game_5'),
+            InlineKeyboardButton("🪦 Brawl Pirates", callback_data='game_6')
+        ],
+        [
+            InlineKeyboardButton(get_text(context, "Назад", "Back"), callback_data='show_main_menu')
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(games_keyboard)
+
+    with open(GAME_MENU_IMAGE, 'rb') as photo:
+        message = await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=photo,
+            caption=get_text(context, "Выберите игру:", "Choose a game:"),
+            reply_markup=reply_markup
+        )
+        context.user_data['previous_message_id'] = message.message_id
+        
+async def game_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    await delete_previous_message(update, context)
+
+    selected_game = query.data.split('_')[-1]
+
+    game_urls = {
+        '1': "https://aviator-predictor-tgbot.netlify.app",
+        '2': "https://lucky-jet-predictor-tgbot.netlify.app",
+        '3': "https://speedandcash-predictor-tgbot.netlify.app",
+        '4': "https://mines-predictor-tgbot.netlify.app",
+        '5': "https://royal-mines-predictor-tgbot.netlify.app",
+        '6': "https://brawl-pirates-predictor-tgbot.netlify.app",
+    }
+
+    game_details = {
+        '1': {
+            'message': get_text(
+                context,
+                "✈️ Aviator - это захватывающая гэмблинг игра, где ваше мастерство заключается в том, чтобы спланировать вашу ставку до отлета самолета с вашими деньгами.\n"
+                "Чем дольше он находится в воздухе, тем более щедро он вознаграждает вас по окончании партии.\n"
+                "Найдите оптимальный момент для вложения и завоевания победы в этой захватывающей игре!\n"
+                "Наш инновационный бот, основанный на передовой нейросети от OpenAI, обладает способностью предсказывать точные коэффициенты с вероятностью вплоть до 85%,\n"
+                "что позволяет вам сделать обоснованные ставки и увеличить свои шансы на успешное завершение игры.",
+                "✈️ Aviator is an exciting gambling game where your skill is to plan your bet before the plane flies away with your money.\n"
+                "The longer it stays in the air, the more generously it rewards you at the end of the game.\n"
+                "Find the optimal moment to invest and win in this thrilling game!\n"
+                "Our innovative bot, powered by OpenAI's advanced neural network, can predict accurate odds with up to 85% probability,\n"
+                "allowing you to make informed bets and increase your chances of winning."
+            ),
+            'image': "bot/management/commands/images/aviator.png"
+        },
+        '2': {
+            'message': get_text(
+                context,
+                "🚀 Добро пожаловать в мир Lucky Jet - захватывающей гэмблинг игры, где каждая ваша ставка должна быть сделана в гармонии с отлетом летящего самолета,\n"
+                "который несет ваши деньги в небеса.\n"
+                "Чем дальше путь пролетает, тем более щедрым становится ваш выигрыш при приземлении.\n"
+                "Почувствуйте магию момента идеальной ставки, угадайте момент для победы, ведь в этом азартном полете каждая секунда имеет значение!\n"
+                "Наш надежный бот всегда рядом, чтобы помочь вам сделать правильный выбор и увеличить ваши шансы на победу.\n"
+                "Вступайте в игру с Lucky Jet, где удача всегда на вашей стороне!",
+                "🚀 Welcome to the world of Lucky Jet - an exciting gambling game where every bet you make must be timed with the flight of a plane,\n"
+                "that takes your money to the skies.\n"
+                "The farther it flies, the greater your reward upon landing.\n"
+                "Feel the magic of the perfect bet moment, guess the timing for victory because in this thrilling flight every second counts!\n"
+                "Our trusted bot is always there to help you make the right choice and increase your chances of winning.\n"
+                "Join the game with Lucky Jet where luck is always on your side!"
+            ),
+            'image': "bot/management/commands/images/luckyjet.png"
+        },
+        '3': {
+            'message': get_text(
+                context,
+                "🚗 Speed & Cash предлагает захватывающий игровой опыт с элементами адреналина и быстрыми выигрышами.\n"
+                "Если вам нравятся гонки и азартные игры, эта игра может быть отличным выбором!\n"
+                "Наш инновационный бот, основанный на передовой нейросети от Орепа, обладает способностью предсказывать точные коэффициенты с вероятностью вплоть до 85%,\n"
+                "что позволяет вам сделать обоснованные ставки и увеличить свои шансы на успешное завершение игры.",
+                "🚗 Speed & Cash offers an exciting gaming experience with elements of adrenaline and quick wins.\n"
+                "If you enjoy racing and gambling, this game could be a great choice!\n"
+                "Our innovative bot, based on advanced neural network technology, has the ability to predict accurate odds with up to 85% probability,\n"
+                "allowing you to make informed bets and increase your chances of successful game completion."
+            ),
+            'image': "bot/management/commands/images/speed_and_cash.png"
+        },
+        '4': {
+            'message': get_text(
+                context,
+                "💣 Mines - это увлекательная гэмблинг игра, доступная в букмекерской конторе 1 win, которая вдохновлена классической игрой Сапер.\n"
+                "Ваша задача состоит в том, чтобы открывать безопасные ячейки, избегая попадания в ловушки.\n"
+                "Наш умный бот, разработанный на основе нейросети от Орепа, обладает удивительной способностью предугадывать расположение звезд на поле с вероятностью в 85%.\n"
+                "Доверьтесь его интуиции и стратегии, чтобы увеличить свои шансы на победу.\n"
+                "Погрузитесь в захватывающий мир Mines и испытайте свою удачу прямо сейчас!\n"
+                "Ближайшее время прогноза - 1 минута",
+                "💣 Mines is an exciting gambling game available at 1 win bookmaker, inspired by the classic Minesweeper game.\n"
+                "Your goal is to open safe cells, avoiding traps.\n"
+                "Our smart bot, developed on a neural network basis, has an amazing ability to predict the location of stars with an 85% probability.\n"
+                "Trust its intuition and strategy to increase your chances of winning.\n"
+                "Dive into the thrilling world of Mines and test your luck right now!\n"
+                "The nearest forecast time is 1 minute."
+            ),
+            'image': "bot/management/commands/images/mines.png"
+        },
+        '5': {
+            'message': get_text(
+                context,
+                "👑 Royal Mines - это увлекательная гэмблинг игра, доступная в букмекерской конторе Twin, которая вдохновлена классической игрой Сапёр.\n"
+                "Ваша задача состоит в том, чтобы открывать безопасные ячейки, избегая попадания в ловушки.\n"
+                "Наш умный бот, разработанный на основе нейросети от Орепа, обладает удивительной способностью предугадывать расположение бомб на поле с вероятностью > 85%.\n"
+                "Доверьтесь его интуиции и стратегии, чтобы увеличить свои шансы на победу.\n"
+                "Погрузитесь в захватывающий мир Royal Mines и испытайте свою удачу прямо сейчас!\n"
+                "Ближайшее время прогноза - 1 минута",
+                "👑 Royal Mines is an exciting gambling game available at Twin bookmaker, inspired by the classic game Mines.\n"
+                "Your task is to open safe cells, avoiding falling into traps.\n"
+                "Our smart bot, developed on the basis of the neural network from Orep, has an amazing ability to predict the location of bombs on the field with a probability of > 85%.\n"
+                "Trust its intuition and strategy to increase your chances of winning.\n"
+                "Dive into the exciting world of Royal Mines and try your luck right now!\n"
+                "The nearest forecast time is 1 minute."
+            ),
+            'image': "bot/management/commands/images/royal.png"
+        },
+        '6': {
+            'message': get_text(
+                context,
+                "🪦 Brawl Pirates - это игра в букмекерской конторе Twin, которая основывается на выборе Черепа.\n"
+                "В этой игре пользователи смогут испытать свою удачу и найти сокровища пиратов, выиграв тем самым реальные деньги.\n"
+                "Игра предлагает каждому выбрать один из трех черепов и угадать, в каком из них находится сокровище.\n"
+                "Наш бот основан на нейросети. Он может предугадать результат с вероятностью 97%.\n"
+                "Ближайшее время прогноза - 1 минута",
+                "🪦 Brawl Pirates is a game at the Twin bookmaker, based on Skull selection.\n"
+                "In this game, users can test their luck and find pirate treasures to win real money.\n"
+                "The game offers each player the chance to choose one of three skulls and guess where the treasure is hidden.\n"
+                "Our bot, based on a neural network, can predict the outcome with a 97% probability.\n"
+                "The nearest forecast time is 1 minute."
+            ),
+            'image': "bot/management/commands/images/brawl_pirates.png"
+        }
+    }
+    
+
+    game_info = game_details.get(selected_game)
+    if game_info:
+        web_app_url = game_urls.get(selected_game)
+        with open(game_info['image'], 'rb') as photo:
+            message = await context.bot.send_photo(
+                chat_id=query.message.chat.id,
+                photo=photo,
+                caption=game_info['message'],
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(get_text(context, "Получить сигнал", "Get Signal"), 
+                                        web_app={"url": web_app_url})],
+                    [InlineKeyboardButton(get_text(context, "Назад", "Back"), 
+                                        callback_data='go_back')]
+                ])
+            )
+            context.user_data['previous_message_id'] = message.message_id
+    else:
+        message = await query.message.reply_text(
+            get_text(context, "Извините, не удалось найти информацию для выбранной игры.", 
+                    "Sorry, information for the selected game could not be found.")
+        )
+        context.user_data['previous_message_id'] = message.message_id
+
+async def go_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    await delete_previous_message(update, context)
+    await show_games_menu(query, context)
+
+async def change_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    await delete_previous_message(update, context)
+    await start(update, context)
+
+class Command(BaseCommand):
+    help = 'Telegram Bot'
+
+    def handle(self, *args, **kwargs):
+        application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CallbackQueryHandler(language_selected, pattern="^lang_"))
+        application.add_handler(CallbackQueryHandler(change_language, pattern="^lang_change$"))
+        application.add_handler(CallbackQueryHandler(play, pattern="^play$"))
+        application.add_handler(CallbackQueryHandler(go_back, pattern="^go_back$"))
+        application.add_handler(CallbackQueryHandler(game_selected, pattern="^game_"))
+        application.add_handler(CallbackQueryHandler(start, pattern="^start$"))
+        application.add_handler(CallbackQueryHandler(show_main_menu, pattern="^show_main_menu$"))
+        application.add_handler(CallbackQueryHandler(continue_after_subscribe, pattern="^continue_after_subscribe$"))
+
+        application.run_polling()
