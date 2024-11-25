@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import os
+from bot.models import UserRegistration
 import asyncio
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "7795385929:AAF98EsKowGgpg9wgEN91qpZZh5x5tLHTcM")
@@ -10,21 +11,19 @@ LANGUAGE_SELECTION_IMAGE = "bot/management/commands/images/lang.jpg"
 MAIN_MENU_IMAGE = "bot/management/commands/images/menu.jpg"
 GAME_MENU_IMAGE = "bot/management/commands/images/games.jpg"
 
-WEBHOOK_URL = f"https://slvdev.pythonanywhere.com/telegram/"
-
-# Асинхронные функции бота
 async def delete_previous_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     if isinstance(update.callback_query, CallbackQuery):
         chat_id = update.callback_query.message.chat_id
-
-    previous_message_id = context.user_data.get("previous_message_id")
+        
+    previous_message_id = context.user_data.get('previous_message_id')
     if previous_message_id:
         try:
             await context.bot.delete_message(chat_id=chat_id, message_id=previous_message_id)
         except Exception as e:
             print(f"Error deleting message: {e}")
-
+    
+    # Also try to delete the message that triggered the callback
     if isinstance(update.callback_query, CallbackQuery):
         try:
             await update.callback_query.message.delete()
@@ -32,25 +31,25 @@ async def delete_previous_message(update: Update, context: ContextTypes.DEFAULT_
             print(f"Error deleting callback message: {e}")
 
 def get_text(context, ru_text, en_text):
-    return ru_text if context.user_data.get("language") == "ru" else en_text
+    return ru_text if context.user_data.get('language') == 'ru' else en_text
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await delete_previous_message(update, context)
-
+    
     language_keyboard = [
-        [InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru")],
-        [InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")],
+        [InlineKeyboardButton("🇷🇺 Русский", callback_data='lang_ru')],
+        [InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')]
     ]
     reply_markup = InlineKeyboardMarkup(language_keyboard)
 
-    with open(LANGUAGE_SELECTION_IMAGE, "rb") as photo:
+    with open(LANGUAGE_SELECTION_IMAGE, 'rb') as photo:
         message = await context.bot.send_photo(
             chat_id=update.effective_chat.id,
             photo=photo,
             caption="Выберите язык / Choose your language:",
-            reply_markup=reply_markup,
+            reply_markup=reply_markup
         )
-        context.user_data["previous_message_id"] = message.message_id
+        context.user_data['previous_message_id'] = message.message_id
 
 async def language_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -239,6 +238,4 @@ class Command(BaseCommand):
 
         application.run_polling()
 
-async def set_webhook(application):
-    """Устанавливает вебхук для бота."""
-    await application.bot.set_webhook(WEBHOOK_URL)
+       

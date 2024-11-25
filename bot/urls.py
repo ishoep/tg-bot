@@ -1,6 +1,6 @@
 from django.urls import path
-from .views import bot_webhook
+from . import views  # Импорт views.py из текущего приложения
 
 urlpatterns = [
-    path("telegram/", bot_webhook, name="bot_webhook"),
+    # Другие маршруты вашего проекта
 ]
